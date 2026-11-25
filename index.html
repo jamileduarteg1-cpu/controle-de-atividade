@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Diário de Pontos & Metas - Personalizável</title>
+  
+  <!-- Tailwind CSS -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  
+  <!-- Google Fonts: Fredoka & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+  
+  <!-- FontAwesome Icons -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  
+  <!-- React and ReactDOM -->
+  <script src="https://unpkg.com/react@18/umd/react.production.min.js" crossorigin></script>
+  <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js" crossorigin></script>
+  
+  <!-- Babel for JSX -->
+  <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+  
+  <!-- Canvas Confetti -->
+  <script src="https://cdn.jsdelivr.net/npm/canvas-confetti@1.6.0/dist/confetti.browser.min.js"></script>
+
+  <!-- Firebase SDKs -->
+  <script type="module">
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, getDoc, setDoc, onSnapshot, collection } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    window.FirebaseModules = {
+      initializeApp,
+      getAuth,
+      signInAnonymously,
+      signInWithCustomToken,
+      onAuthStateChanged,
+      getFirestore,
+      doc,
+      getDoc,
+      setDoc,
+      onSnapshot,
+      collection
+    };
+    window.dispatchEvent(new Event('firebase-ready'));
+  </script>
+
+  <style>
+    body {
+      font-family: 'Inter', sans-serif;
+      background-color: #f8fafc;
+    }
+    .font-fredoka {
+      font-family: 'Fredoka', cursive, sans-serif;
+    }
+    .gradient-bg {
+      background: linear-gradient(135deg, #8b5cf6 0%, #ec4899 50%, #f59e0b 100%);
+    }
+    .card-shadow {
+      box-shadow: 0 10px 25px -5px rgba(139, 92, 246, 0.1), 0 8px 10px -6px rgba(139, 92, 246, 0.05);
+    }
+    ::-webkit-scrollbar {
+      width: 6px;
+      height: 6px;
+    }
+    ::-webkit-scrollbar-track {
+      background: #f1f5f9;
+    }
+    ::-webkit-scrollbar-thumb {
+      background: #cbd5e1;
+      border-radius: 9999px;
+    }
+    ::-webkit-scrollbar-thumb:hover {
+      background: #94a3b8;
+    }
+    .animate-bounce-short {
+      animation: bounce 0.6s ease infinite alternate;
+    }
+    @keyframes bounce {
+      from { transform: translateY(0); }
+      to { transform: translateY(-5px); }
+    }
+  </style>
+</head>
+<body class="text-slate-800 antialiased min-h-screen">
+  <div id="root"></div>
+
+  <script type="text/babel">
+    const { useState, useEffect, useMemo, useRef } = React;
+
+    // Default Activities List
+    const INITIAL_TASKS = [
+      { id: 'dentes_manha', title: 'Escovar os dentes (Manhã)', points: 1, category: 'daily', icon: '🦷' },
+      { id: 'dentes_noite', title: 'Escovar os dentes (Noite)', points: 1, category: 'daily', icon: '🌙' },
+      { id: 'arrumar_cama', title: 'Arrumar a cama ao acordar', points: 2, category: 'daily', icon: '🛏️' },
+      { id: 'licao_estudo', title: 'Fazer a lição de casa / estudar', points: 3, category: 'daily', icon: '📚' },
+      { id: 'mochila_uniforme', title: 'Organizar mochila e uniforme para o dia seguinte', points: 2, category: 'daily', icon: '🎒' },
+      { id: 'sapatos_roupas', title: 'Guardar sapatos e roupas sujas no cesto', points: 2, category: 'daily', icon: '👕' },
+      { id: 'brinquedos_objetos', title: 'Guardar brinquedos / objetos fora do lugar', points: 2, category: 'daily', icon: '🧸' },
+      { id: 'louca_pia', title: 'Levar a própria louça para a pia', points: 2, category: 'daily', icon: '🍽️' },
+      { id: 'garrafas_agua', title: 'Encher garrafas de água', points: 2, category: 'daily', icon: '💧' },
+      { id: 'regar_plantas', title: 'Regar as plantas (conforme combinado)', points: 2, category: 'daily', icon: '🪴' },
+      
+      { id: 'tirar_lixo', title: 'Tirar o lixo (3x na semana)', points: 3, category: 'weekly', icon: '🧹' },
+      { id: 'dobrar_louca', title: 'Ajudar a guardar louça limpa ou dobrar roupas', points: 3, category: 'weekly', icon: '🧺' },
+      { id: 'mesa_estudos', title: 'Organizar a mesa de estudos (1x na semana)', points: 4, category: 'weekly', icon: '🖥️' },
+    ];
+
+    const EMOJI_OPTIONS = ['⭐', '📚', '🧹', '🪴', '💧', '🛏️', '🦷', '🍽️', '🎒', '👕', '🧸', '🧺', '🌙', '🎨', '🚲', '🐶', '🍎', '🧩'];
+
+    const playAudio = (type) => {
+      try {
+        const AudioCtx = window.AudioContext || window.webkitAudioContext;
+        if (!AudioCtx) return;
+        const ctx = new AudioCtx();
+        const osc = ctx.createOscillator();
+        const gain = ctx.createGain();
+        osc.connect(gain);
+        gain.connect(ctx.destination);
+
+        if (type === 'success') {
+          osc.type = 'sine';
+          osc.frequency.setValueAtTime(523.25, ctx.currentTime);
+          osc.frequency.exponentialRampToValueAtTime(783.99, ctx.currentTime + 0.15);
+          gain.gain.setValueAtTime(0.2, ctx.currentTime);
+          gain.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.3);
+        } else if (type === 'penalty') {
+          osc.type = 'sawtooth';
+          osc.frequency.setValueAtTime(220, ctx.currentTime);
+          osc.frequency.linearRampToValueAtTime(130, ctx.currentTime + 0.25);
+          gain.gain.setValueAtTime(0.25, ctx.currentTime);
+          gain.gain.linearRampToValueAtTime(0.01, ctx.currentTime + 0.3);
+          osc.start();
+          osc.stop(ctx.currentTime + 0.3);
+        } else if (type === 'fanfare') {
+          const notes = [523.25, 659.25, 783.99, 1046.50];
+          notes.forEach((freq, idx) => {
+            const o = ctx.createOscillator();
+            const g = ctx.createGain();
+            o.connect(g);
+            g.connect(ctx.destination);
+            o.frequency.value = freq;
+            g.gain.setValueAtTime(0.15, ctx.currentTime + idx * 0.1);
+            g.gain.exponentialRampToValueAtTime(0.01, ctx.currentTime + idx * 0.1 + 0.25);
+            o.start(ctx.currentTime + idx * 0.1);
+            o.stop(ctx.currentTime + idx * 0.1 + 0.25);
+          });
+        }
+      } catch (e) {}
+    };
+
+    const formatDateKey = (date) => {
+      const d = new Date(date);
+      const year = d.getFullYear();
+      const month = String(d.getMonth() + 1).padStart(2, '0');
+      const day = String(d.getDate()).padStart(2, '0');
+      return `${year}-${month}-${day}`;
+    };
+
+    const formatBRDate = (dateStr) => {
+      if (!dateStr) return '';
+      const parts = dateStr.split('-');
+      if (parts.length !== 3) return dateStr;
+      return `${parts[2]}/${parts[1]}/${parts[0]}`;
+    };
+
+    const getCycleForDate = (dateKey, cycleStartDay = 13) => {
+      const date = new Date(dateKey + 'T00:00:00');
+      const year = date.getFullYear();
+      const month = date.getMonth();
+      const day = date.getDate();
+
+      let startYear = year;
+      let startMonth = month;
+
+      if (day < cycleStartDay) {
+        startMonth = month - 1;
+        if (startMonth < 0) {
+          startMonth = 11;
+          startYear = year - 1;
+        }
+      }
+
+      const startDate = new Date(startYear, startMonth, cycleStartDay);
+      
+      let endMonth = startMonth + 1;
+      let endYear = startYear;
+      if (endMonth > 11) {
+        endMonth = 0;
+        endYear = startYear + 1;
+      }
+      const endDate = new Date(endYear, endMonth, cycleStartDay - 1);
+
+      return {
+        startStr: formatDateKey(startDate),
+        endStr: formatDateKey(endDate),
+        startDate,
+        endDate,
+        label: `Ciclo: ${formatBRDate(formatDateKey(startDate))} até ${formatBRDate(formatDateKey(endDate))}`
+      };
+    };
+
+    // Simple hash function for client-side password verification in public profiles
+    const simpleHash = (str) => {
+      let hash = 0;
+      for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+      }
+      return 'h_' + Math.abs(hash).toString(36) + '_' + str.length;
+    };
+
+    const sanitizeUsername = (name) => {
+      return name
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[\u0300-\u036f]/g, '')
+        .replace(/[^a-z0-9]/g, '');
+    };
+
+    function App() {
+      // Firebase State
+      const [fbReady, setFbReady] = useState(!!window.FirebaseModules);
+      const [fbUser, setFbUser] = useState(null);
+      const [dbInstance, setDbInstance] = useState(null);
+
+      // Account / Profile State
+      const [loggedAccount, setLoggedAccount] = useState(null); // { username, ownerName, goalPoints, maxReward, cycleStartDay }
+      const [authMode, setAuthMode] = useState('login'); // 'login' | 'register'
+      const [authUsername, setAuthUsername] = useState('');
+      const [authPassword, setAuthPassword] = useState('');
+      const [authOwnerName, setAuthOwnerName] = useState('');
+      const [authError, setAuthError] = useState('');
+      const [authLoading, setAuthLoading] = useState(false);
+
+      // App UI State
+      const [selectedDate, setSelectedDate] = useState(() => formatDateKey(new Date()));
+      const [activeTab, setActiveTab] = useState('daily');
+      const [lastSavedTime, setLastSavedTime] = useState('');
+      const [isSyncing, setIsSyncing] = useState(false);
+      const [toastMsg, setToastMsg] = useState('');
+      const fileInputRef = useRef(null);
+
+      // Data State (synced with Firestore)
+      const [taskList, setTaskList] = useState(INITIAL_TASKS);
+      const [records, setRecords] = useState({});
+
+      // Profile Settings Edit State
+      const [editOwnerName, setEditOwnerName] = useState('');
+      const [editGoalPoints, setEditGoalPoints] = useState(300);
+      const [editMaxReward, setEditMaxReward] = useState(30);
+      const [editCycleDay, setEditCycleDay] = useState(13);
+      const [editNewPassword, setEditNewPassword] = useState('');
+
+      // Bonus/Penalty forms
+      const [bonusDesc, setBonusDesc] = useState('');
+      const [bonusVal, setBonusVal] = useState(3);
+      const [penaltyDesc, setPenaltyDesc] = useState('');
+      const [penaltyVal, setPenaltyVal] = useState(3);
+      const [showModalClosed, setShowModalClosed] = useState(false);
+
+      // Confirmation Modal (replaces native confirm())
+      const [confirmDialog, setConfirmDialog] = useState({ open: false, title: '', message: '', onConfirm: null });
+
+      // Activity Modal
+      const [showTaskModal, setShowTaskModal] = useState(false);
+      const [editingTaskId, setEditingTaskId] = useState(null);
+      const [taskTitle, setTaskTitle] = useState('');
+      const [taskCategory, setTaskCategory] = useState('daily');
+      const [taskPoints, setTaskPoints] = useState(2);
+      const [taskIcon, setTaskIcon] = useState('⭐');
+
+      // Initialize Firebase
+      useEffect(() => {
+        if (!fbReady) {
+          const handler = () => setFbReady(true);
+          window.addEventListener('firebase-ready', handler);
+          return () => window.removeEventListener('firebase-ready', handler);
+        }
+      }, [fbReady]);
+
+      useEffect(() => {
+        if (!fbReady) return;
+        const init = async () => {
+          try {
+            const { initializeApp, getAuth, signInAnonymously, signInWithCustomToken, onAuthStateChanged, getFirestore } = window.FirebaseModules;
+            const rawConfig = typeof __firebase_config !== 'undefined' ? __firebase_config : '{}';
+            const firebaseConfig = typeof rawConfig === 'string' ? JSON.parse(rawConfig) : rawConfig;
+            const app = initializeApp(firebaseConfig);
+            const auth = getAuth(app);
+            const db = getFirestore(app);
+            setDbInstance(db);
+
+            onAuthStateChanged(auth, (user) => {
+              if (user) {
+                setFbUser(user);
+              }
+            });
+
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+              try {
+                const cred = await signInWithCustomToken(auth, __initial_auth_token);
+                setFbUser(cred.user);
+              } catch (tokenErr) {
+                const cred = await signInAnonymously(auth);
+                setFbUser(cred.user);
+              }
+            } else {
+              const cred = await signInAnonymously(auth);
+              setFbUser(cred.user);
+            }
+          } catch (err) {
+            console.error("Firebase init error:", err);
+            setAuthError('Erro ao conectar com o servidor: ' + (err.message || 'verifique sua internet.'));
+          }
+        };
+        init();
+      }, [fbReady]);
+
+      // Listen to real-time updates when logged in
+      useEffect(() => {
+        if (!fbUser || !dbInstance || !loggedAccount) return;
+        const { doc, onSnapshot } = window.FirebaseModules;
+        const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+        const profileRef = doc(dbInstance, 'artifacts', appId, 'public', 'data', 'diaries', loggedAccount.username);
+
+        const unsubscribe = onSnapshot(profileRef, (snap) => {
+          if (snap.exists()) {
+            const data = snap.data();
+            if (data.taskList) setTaskList(data.taskList);
+            if (data.records) setRecords(data.records);
+            setLoggedAccount(prev => ({
+              ...prev,
+              ownerName: data.ownerName || prev.ownerName,
+              goalPoints: data.goalPoints || 300,
+              maxReward: data.maxReward || 30,
+              cycleStartDay: data.cycleStartDay || 13
+            }));
+          }
+        }, (err) => {
+          console.error("Snapshot error:", err);
+        });
+
+        return () => unsubscribe();
+      }, [fbUser, dbInstance, loggedAccount?.username]);
+
+      // Sync edit inputs when switching to settings or loading profile
+      useEffect(() => {
+        if (loggedAccount) {
+          setEditOwnerName(loggedAccount.ownerName || '');
+          setEditGoalPoints(loggedAccount.goalPoints || 300);
+          setEditMaxReward(loggedAccount.maxReward || 30);
+          setEditCycleDay(loggedAccount.cycleStartDay || 13);
+        }
+      }, [loggedAccount]);
+
+      const showToast = (msg) => {
+        setToastMsg(msg);
+        setTimeout(() => setToastMsg(''), 3200);
+      };
+
+      const askConfirm = (title, message, onConfirm) => {
+        setConfirmDialog({ open: true, title, message, onConfirm });
+      };
+
+      // Save data to Firestore
+      const saveCloudState = async (updatedRecords, updatedTaskList, updatedMeta = null) => {
+        if (!fbUser || !dbInstance || !loggedAccount) return;
+        setIsSyncing(true);
+        try {
+          const { doc, setDoc } = window.FirebaseModules;
+          const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+          const profileRef = doc(dbInstance, 'artifacts', appId, 'public', 'data', 'diaries', loggedAccount.username);
+
+          const payload = {
+            records: updatedRecords,
+            taskList: updatedTaskList,
+            updatedAt: new Date().toISOString()
+          };
+
+          if (updatedMeta) {
+            Object.assign(payload, updatedMeta);
+          }
+
+          await setDoc(profileRef, payload, { merge: true });
+          const time = new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit', second: '2-digit' });
+          setLastSavedTime(time);
+        } catch (e) {
+          console.error('Cloud save error:', e);
+          showToast('Erro ao salvar na nuvem. Verifique sua conexão.');
+        } finally {
+          setIsSyncing(false);
+        }
+      };
+
+      // Handle Login / Register
+      const handleAuthSubmit = async (e) => {
+        e.preventDefault();
+        setAuthError('');
+
+        if (!dbInstance) {
+          setAuthError('Conectando ao servidor... Aguarde um instante e tente novamente.');
+          return;
+        }
+
+        const cleanUser = sanitizeUsername(authUsername);
+        if (cleanUser.length < 3) {
+          setAuthError('O nome de usuário deve ter pelo menos 3 letras ou números.');
+          return;
+        }
+        if (authPassword.length < 4) {
+          setAuthError('A senha deve ter pelo menos 4 caracteres.');
+          return;
+        }
+
+        setAuthLoading(true);
+        try {
+          const { getAuth, signInAnonymously, doc, getDoc, setDoc } = window.FirebaseModules;
+          const auth = getAuth();
+          let currentUser = fbUser || auth.currentUser;
+          if (!currentUser) {
+            const cred = await signInAnonymously(auth);
+            currentUser = cred.user;
+            setFbUser(currentUser);
+          }
+
+          const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+          const profileRef = doc(dbInstance, 'artifacts', appId, 'public', 'data', 'diaries', cleanUser);
+          const snap = await getDoc(profileRef);
+
+          if (authMode === 'register') {
+            if (!authOwnerName.trim()) {
+              setAuthError('Informe o nome do dono(a) do diário (ex: Ana Eloá, Pedro...).');
+              setAuthLoading(false);
+              return;
+            }
+            if (snap.exists()) {
+              setAuthError('Este nome de usuário já está em uso! Escolha outro ou faça login.');
+              setAuthLoading(false);
+              return;
+            }
+
+            const todayKey = formatDateKey(new Date());
+            const initialData = {
+              username: cleanUser,
+              passwordHash: simpleHash(authPassword),
+              ownerName: authOwnerName.trim(),
+              goalPoints: 300,
+              maxReward: 30,
+              cycleStartDay: 13,
+              taskList: INITIAL_TASKS,
+              records: {
+                [todayKey]: {
+                  completed: {},
+                  customBonuses: [],
+                  customPenalties: [],
+                  logs: [{ time: new Date().toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' }), text: `Diário de ${authOwnerName.trim()} criado com sucesso! 🌟` }],
+                  confirmed: false,
+                  note: ''
+                }
+              },
+              createdAt: new Date().toISOString()
+            };
+
+            await setDoc(profileRef, initialData);
+            setTaskList(initialData.taskList);
+            setRecords(initialData.records);
+            setLoggedAccount({
+              username: cleanUser,
+              ownerName: initialData.ownerName,
+              goalPoints: 300,
+              maxReward: 30,
+              cycleStartDay: 13
+            });
+            playAudio('fanfare');
+            showToast(`Bem-vindo(a), ${initialData.ownerName}! 🎉`);
+          } else {
+            // Login
+            if (!snap.exists()) {
+              setAuthError('Usuário não encontrado. Verifique o nome ou crie um novo diário.');
+              setAuthLoading(false);
+              return;
+            }
+            const data = snap.data();
+            if (data.passwordHash !== simpleHash(authPassword)) {
+              setAuthError('Senha incorreta. Tente novamente.');
+              setAuthLoading(false);
+              return;
+            }
+
+            setTaskList(data.taskList || INITIAL_TASKS);
+            setRecords(data.records || {});
+            setLoggedAccount({
+              username: cleanUser,
+              ownerName: data.ownerName || cleanUser,
+              goalPoints: data.goalPoints || 300,
+              maxReward: data.maxReward || 30,
+              cycleStartDay: data.cycleStartDay || 13
+            });
+        
